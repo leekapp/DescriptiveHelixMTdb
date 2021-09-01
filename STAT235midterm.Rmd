@@ -1,0 +1,591 @@
+---
+title: "STAT 235 Midterm Project"
+author: "Lee Kapp"
+date: "10/16/2020"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE, message = FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.width = 6, fig.height = 4)
+library(tidyverse); library(gmodels); library(DescTools); library(ggpmisc); library(datasets); library(readxl); library(vcd); library(epitools); #library(Hmisc)
+theme_set(theme_light(base_size = 12))
+```
+
+### Exploratory Data Analysis
+
+```{r data, echo=FALSE, message=FALSE}
+helixMT<-read_tsv("/Users/leekapp/Desktop/STAT 235/STAT235Project/HelixMTdb.tsv")
+
+helixMT<-helixMT %>% select(locus, alleles, feature, gene, counts_hom, counts_het)
+
+helixMT$feature<-ifelse(helixMT$feature =="non_coding", "non coding", helixMT$feature)
+
+helixMT$feature<-ifelse(helixMT$feature =="protein_coding_gene", "protein", helixMT$feature)
+
+helixMT$feature<-ifelse(helixMT$feature =="tRNA_gene", "tRNA", helixMT$feature)
+
+helixMT$feature<-ifelse(helixMT$feature =="rRNA_gene", "rRNA", helixMT$feature)
+
+helixMT <- helixMT %>%  mutate_at(vars(locus:gene), list(factor))
+helixMT$feature <- factor(helixMT$feature, levels = c("non coding", "protein", "rRNA", "tRNA"))
+```
+
+```{r powerlawDist, echo=FALSE, message = FALSE}
+# loci<- as.data.frame(helixMT %>% group_by(locus, feature) %>%  summarize(n()))
+# loci<-loci[order(-loci$`n()`),] #sorting the loci df in descending order
+# loci$Rank<-1:length(loci$`n()`) #making the column "rank"
+# colnames(loci)<- c("locus", "sequence_type", "count", "rank")
+# 
+# ggplot(data = loci, mapping = aes(y = log10(count), x = log10(rank), color = sequence_type)) +
+#   labs(title = "Inverse power law distribution for mutations in human mtDNA",
+#        subtitle = "Highest count/rank for non coding sequences") +
+#   geom_point(size = 3) +
+#   theme_light() +
+#   theme(legend.text = element_text(size = 12)) +
+#   theme(axis.title = element_text(size = 10)) +
+#   theme(axis.text.x = element_text(size = 10)) +
+#   scale_color_manual(values = topo.colors(4))
+```
+
+
+```{r featPlot, echo=FALSE, message=FALSE}
+ggplot(data = helixMT, mapping = aes(x = feature, y = counts_hom, fill = feature)) +
+  geom_col() +
+  labs(title = "Absolute number of homoplasmic mutations by sequence type", x = "Sequence Type", y = "Num Mutations") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme_light() +
+  scale_fill_manual(values = topo.colors(4)) +
+  theme(legend.position = "none")
+  
+
+ggplot(data = helixMT, mapping = aes(x = feature, y = counts_het, fill = feature)) +
+  geom_col() +
+  labs(title = "Absolute number of heteroplasmic mutations by sequence type", x = "Sequence Type", y = "Num Mutations") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme_light() +
+  scale_fill_manual(values = topo.colors(4)) +
+  theme(legend.position = "none")
+  
+  
+```
+
+```{r perBasePair, echo=FALSE, message=FALSE, warning=FALSE}
+#Need to determine number of base pairs of each sequence feature and normalize by that in a df that has total num of mutations per gene
+#getting total counts per gene
+aggMThom<- helixMT %>% group_by(gene) %>% summarize(totalHom = sum(counts_hom))
+aggMThet<- helixMT %>% group_by(gene) %>% summarize(totalHet = sum(counts_het))
+mutByGene<-aggMThom %>% inner_join(aggMThet, by = "gene")
+#importing mitomap data
+geneDB<-read_xlsx("/Users/leekapp/Desktop/STAT 235/STAT235Project/mitoMap.xlsx")
+geneDB$`Shorthand `<-NULL
+geneDB<- geneDB %>% mutate(length = `Ending ` - `Starting `) #determining gene length
+geneDB<- subset(geneDB, select = -c(`Starting `:`Description `))
+colnames(geneDB)<-c("gene", "length")
+geneFeat<- helixMT %>% select(gene, feature)
+geneFeat<- as.data.frame(unique(geneFeat)) #getting unique values for feature by gene
+geneDB<-geneFeat %>% left_join(geneDB, by = "gene") #adding feature
+geneDB<-geneDB[2:50,] #dropping MT-CRb
+
+aggCounts<-mutByGene %>% inner_join(geneDB, by = "gene") #merging helix data and mitomap data for df with gene, feature, total Hom and Het counts, and length
+aggCounts$length<-ifelse(aggCounts$length == 0, 1, aggCounts$length) #can't have a length of 0 so 1 is shortest length
+aggCounts$hom_rate<-round(aggCounts$totalHom/aggCounts$length, 2)
+aggCounts$het_rate<-round(aggCounts$totalHet/aggCounts$length, 2)
+
+meanRates<-aggCounts %>% group_by(feature) %>% summarise(meanHom = mean(hom_rate), meanHet = mean(het_rate), sdHom = sd(hom_rate), sdHet = sd(het_rate))
+
+#total sequence length by feature
+seqLengths<- geneDB %>% group_by(feature) %>% summarize(total_bp = sum(length))
+seqLengths$feature<-factor(seqLengths$feature, levels = c("non coding", "protein", "rRNA", "tRNA"))
+
+#getting total mutation counts by plasmicity
+aggFeats<-aggCounts %>% group_by(feature) %>% summarise(total_hom = sum(totalHom))
+aggFeats2<-aggCounts %>% group_by(feature) %>% summarise(total_het = sum(totalHet))
+aggFeats <- aggFeats %>% inner_join(aggFeats2, by = "feature")
+aggFeats$seq_length<-seqLengths$total_bp #adding sequence lengths by feature
+#normalizing total mutation counts to sequence length by feature
+aggFeats$hom_mut_per_bp<-(aggFeats$total_hom/aggFeats$seq_length) 
+aggFeats$het_mut_per_bp<-(aggFeats$total_het/aggFeats$seq_length)
+
+
+ggplot(data = aggFeats, mapping = aes(x = feature, y = hom_mut_per_bp, fill = feature)) +
+  geom_col() +
+  labs(title = "Homplasmic mutation rate varies by sequence type", x = "sequence type", y = "homoplasmic mutations per length (bp)") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme_light() +
+  scale_fill_manual(values = topo.colors(4)) +
+  theme(legend.position = "none")
+
+ggplot(data = aggFeats, mapping = aes(x = feature, y = het_mut_per_bp, fill = feature)) +
+  geom_col() +
+  labs(title = "Expressed sequences have similar rates of heteroplasmic mutations", x = "sequence type", y = "heteroplasmic mutations per length (bp)") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme_light() +
+  scale_fill_manual(values = topo.colors(4)) +
+  theme(legend.position = "none")
+
+ggplot(data = seqLengths, mapping = aes(x = feature, y = total_bp, fill = feature)) +
+  geom_col() +
+  labs(title = "Most of the mitochondrial genome codes for protein", x = "sequence type", y = "sequence length (bp)") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme_light() +
+  scale_fill_manual(values = topo.colors(4)) +
+  theme(legend.position = "none")
+```
+
+### Are different types of mutations equally likely?
+
+```{r mutationTypes, echo=FALSE}
+helixMT$mutation<-c(rep("unknown", length(helixMT$alleles)))
+helixMT$mutation<-ifelse(helixMT$alleles %in% c("[\"C\",\"T\"]","[\"T\",\"C\"]","[\"A\",\"G\"]","[\"G\",\"A\"]"), "transition", helixMT$mutation)
+helixMT$mutation<-ifelse(helixMT$alleles %in% c("[\"C\",\"A\"]","[\"A\",\"C\"]","[\"C\",\"G\"]","[\"G\",\"C\"]","[\"A\",\"T\"]","[\"T\",\"A\"]", "[\"G\",\"T\"]","[\"T\",\"G\"]"), "transversion", helixMT$mutation)
+helixMT$mutation<-ifelse(helixMT$mutation =="unknown", "in-del", helixMT$mutation)
+
+helixMT <- helixMT %>%  mutate_at(vars(mutation), list(factor))
+
+table(helixMT$mutation)
+#need table that shows mutation type by feature
+
+ggplot(data = helixMT, mapping = aes(x = mutation, fill = mutation)) +
+  geom_bar() +
+  labs(title = "Most mutations in human mtDNA are transitions", x = "Mutation Type", y = "Num Mutations") +
+  scale_fill_manual(values = topo.colors(4)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme(legend.position = "none")
+
+ggplot(data = helixMT, mapping = aes(x = mutation, fill = feature)) +
+  geom_bar(position = 'fill') +
+  labs(title = "Most insertion-deletion mutations affect non coding \nmtDNA sequence", x = "Mutation Type", y = "Num Mutations") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  scale_fill_manual(values = topo.colors(4))
+```
+
+```{r HomvsHet genes, echo=FALSE}
+countsHom<-as.data.frame(helixMT %>% 
+                           select(gene, feature, counts_hom, mutation) %>% 
+                           group_by(gene) %>% filter(counts_hom >= 1000))
+
+countsHet<-as.data.frame(helixMT %>% 
+                           select(gene, feature, counts_het, mutation) %>% 
+                           group_by(gene) %>% filter(counts_het >= 50))
+
+ggplot(data = countsHom, mapping = aes(x = gene, fill = feature)) +
+  geom_bar() +
+  labs(title = "High frequency homoplasmic mutations are widely tolerated", subtitle = "Genes permitting > 1000 homoplasmic mutations", x = "Gene", y = "Mutations detected with > 1000 instances for gene") +
+  theme(axis.text.x = element_text(size = 10)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme_minimal(base_line_size = 0) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_manual(values = topo.colors(4))
+
+ggsave("hom1000.png")
+
+ggplot(data = countsHet, mapping = aes(x = gene, fill = feature)) +
+  geom_bar() +
+  labs(title = "Fewer heteroplasmic mutations present in coding sequences", subtitle = "Genes permitting > 50 heteroplasmic mutations", x = "Gene", y = "Mutations detected with > 50 instances for gene") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme_minimal(base_line_size = 0) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  scale_fill_manual(values = topo.colors(4))
+
+ggsave("het50.png")
+```
+
+```{r mutationDist, echo=FALSE}
+ggplot(data = countsHom, mapping = aes(x = gene, fill = mutation)) +
+  geom_bar() +
+  labs(title = "Several genes  tolerate > 1000 homoplasmic mutations", x = "Gene", y = "Mutations detected with > 1000 instances for gene") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  theme(axis.text.x = element_text(size = 10)) +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text = element_text(size = 9))
+
+ggplot(data = countsHet, mapping = aes(x = gene, fill = mutation)) +
+  geom_bar() +
+  labs(title = "Relatively few genes tolerate > 50 heteroplasmic mutations", x = "Gene", y = "Mutations detected with > 50 instances for gene") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+```{r individualGenes, echo=FALSE}
+tRNAs<-helixMT %>% select(gene, feature, counts_hom, counts_het, mutation) %>% group_by(gene) %>% filter(feature == "tRNA")
+
+rRNAs<-helixMT %>% select(gene, feature, counts_hom, counts_het, mutation) %>% group_by(gene) %>% filter(feature == "rRNA")
+
+proteins<-helixMT %>% select(gene, feature, counts_hom, counts_het, mutation) %>% group_by(gene) %>% filter(feature == "protein")
+
+non_coding<-helixMT %>% select(gene, feature, counts_hom, counts_het, mutation) %>% group_by(gene) %>% filter(feature == "non coding")
+```
+
+
+```{r tRNAGenes, echo=FALSE}
+ggplot(data = tRNAs, mapping = aes(x = gene, y = counts_hom, fill = mutation)) +
+  geom_col() +
+  labs(title = "Not all tRNA genes equally tolerate homoplasmic mutations", x = "tRNA gene", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+
+ggplot(data = tRNAs, mapping = aes(x = gene, y = counts_het, fill = mutation)) +
+  geom_col() +
+  labs(title = "Heteroplasmic tRNA mutations are more uniformly distributed", x = "tRNA gene", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+
+#can place each amino acid sequence for 13 proteins in a single string and then count the number of occurences of each amino acid - columns = each amino acid, rows = counts
+```
+
+```{r rRNAGenes, echo=FALSE}
+ggplot(data = rRNAs, mapping = aes(x = gene, y = counts_hom, fill = mutation)) +
+  geom_col() +
+  labs(title = "Most homoplasmic rRNA mutations are transitions", x = "rRNA gene", y = "Number of times mutation detected")  +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10))
+
+
+ggplot(data = rRNAs, mapping = aes(x = gene, y = counts_het, fill = mutation)) +
+  geom_col() +
+  labs(title = "In-del rRNA mutations must be heteroplasmic", x = "rRNA gene", y = "Number of times mutation detected") +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.title = element_text(size = 10))
+```
+
+```{r proteinCoding, echo=FALSE}
+ggplot(data = proteins, mapping = aes(x = gene, y = counts_hom, fill = mutation)) +
+  geom_col() +
+  labs(title = "Transitions predominate homoplasmic mutations affecting proteins", x = "protein gene", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+
+ggplot(data = proteins, mapping = aes(x = gene, y = counts_het, fill = mutation)) +
+  geom_col() +
+  labs(title = "Heteroplasmic mutations affecting proteins are more diverse", x = "protein gene", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+```
+
+```{r nonCoding, echo=FALSE}
+ggplot(data = non_coding, mapping = aes(x = gene, y = counts_hom, fill = mutation)) +
+  geom_col() +
+  labs(title = "The control region has the most homoplasmic mutations", x = "non-coding sequence", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+
+ggplot(data = non_coding, mapping = aes(x = gene, y = counts_het, fill = mutation)) +
+  geom_col() +
+  labs(title = "The control region has the most heteroplasmic mutations", x = "non-coding sequence", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+
+noCR<-non_coding %>% filter(gene != "MT-CR" && gene != "MT-CRb")
+
+ggplot(data = noCR, mapping = aes(x = gene, y = counts_hom, fill = mutation)) +
+  geom_col() +
+  labs(title = "Non-coding homoplasmic mutations excluding CR & CRb", x = "non-coding sequence", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+
+ggplot(data = noCR, mapping = aes(x = gene, y = counts_het, fill = mutation)) +
+  geom_col() +
+  labs(title = "Non-coding heteroplasmic mutations excluding CR & CRb", x = "non-coding sequence", y = "Number of times mutation detected") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text = element_text(angle = 90))
+```
+
+```{r tables}
+df1<-aggCounts %>% select(gene, feature, hom_rate, het_rate)
+
+df2<-data.frame(gene = rep(c(df1$gene), 2), 
+                feature = rep(c(df1$feature), 2),
+                plasmicity = c(rep("homoplasmic", 49), rep("heteroplasmic", 49)),
+                rate = c(df1$hom_rate, df1$het_rate))
+df2$feature<- ifelse(df2$feature == 1, "non coding", df2$feature)
+df2$feature<- ifelse(df2$feature == 2, "protein", df2$feature)
+df2$feature<- ifelse(df2$feature == 3, "rRNA", df2$feature)
+df2$feature<- ifelse(df2$feature == 4, "tRNA", df2$feature)
+df2$feature<-as.factor(df2$feature)
+
+df3<-helixMT %>% select(3:7)
+
+df4<-data.frame(gene = rep(c(df3$gene), 2),
+                feature = rep(c(df3$feature), 2),
+                mutation = rep(c(df3$mutation), 2),
+                plasmicity = c(rep("homoplasmic", 14324), rep("heteroplasmic", 14324)))
+df4$gene<-as.factor(df4$gene)
+df4$feature<-as.factor(df4$feature)
+df4$mutation<-as.factor(df4$mutation)
+
+df4$feature<- ifelse(df4$feature == 1, "non coding", df4$feature)
+df4$feature<- ifelse(df4$feature == 2, "protein", df4$feature)
+df4$feature<- ifelse(df4$feature == 3, "rRNA", df4$feature)
+df4$feature<- ifelse(df4$feature == 4, "tRNA", df4$feature)
+
+df4$mutation<- ifelse(df4$mutation == 1, "in-del", df4$mutation)
+df4$mutation<- ifelse(df4$mutation == 2, "transition", df4$mutation)
+df4$mutation<- ifelse(df4$mutation == 3, "transversion", df4$mutation)
+
+df4$gene<-factor(rep(df3$gene, 2))
+#eliminate the control region
+df4<-df4 %>% filter(gene != "MT-CRb")
+df4<-df4 %>% filter(gene != "MT-CR")
+
+df5<-df3 %>% group_by(gene, mutation) %>% mutate(countsHom = sum(counts_hom), countsHet = sum(counts_het))
+df5$counts_het<-NULL; df5$counts_hom<-NULL
+df5<-unique(df5)
+geneLengths<-geneDB[-c(2)]
+ratesplasm<-df5 %>% inner_join(geneLengths, by = "gene")
+ratesplasm$length<-ifelse(ratesplasm$length == 0, 1, ratesplasm$length) #can't have a length of 0 so 1 is shortest length
+ratesplasm<-ratesplasm %>%  group_by(gene) %>% mutate(homRate = round(countsHom/length, 2), hetRate = round(countsHet/length, 2))
+ratesplasm<- ratesplasm[-c(4:5)]
+ratesplasm<- ratesplasm[-c(4)]
+
+mutRates<-data.frame(gene = rep(c(ratesplasm$gene), 2), 
+                feature = rep(c(ratesplasm$feature), 2),
+                mutation = rep(c(ratesplasm$mutation), 2),
+                plasmicity = c(rep("homoplasmic", 137), rep("heteroplasmic", 137)),
+                rate = c(ratesplasm$homRate, ratesplasm$hetRate))
+mutRates$feature<- ifelse(mutRates$feature == 1, "non coding", mutRates$feature)
+mutRates$feature<- ifelse(mutRates$feature == 2, "protein", mutRates$feature)
+mutRates$feature<- ifelse(mutRates$feature == 3, "rRNA", mutRates$feature)
+mutRates$feature<- ifelse(mutRates$feature == 4, "tRNA", mutRates$feature)
+mutRates$feature<-as.factor(mutRates$feature)
+
+mutRates$mutation<- ifelse(mutRates$mutation == 1, "in-del", mutRates$mutation)
+mutRates$mutation<- ifelse(mutRates$mutation == 2, "transition", mutRates$mutation)
+mutRates$mutation<- ifelse(mutRates$mutation == 3, "transversion", mutRates$mutation)
+
+
+```
+
+```{r 2x2Tables}
+f_table <- xtabs(rate~plasmicity + feature, data=df2) #row variable, then col variable
+f_table <-f_table[c(2,1),]
+f_table
+m_table <- xtabs(rate~plasmicity + mutation, data=mutRates) #row variable, then col variable
+m_table <- m_table[c(2,1),]
+m_table
+#need to dichotomize coding vs non-coding features and point mutations vs indels
+(coding <- rowSums(f_table[,2:4]))
+(noncoding <- f_table[,1])
+#unite to make binary table
+(f_binary <- as.table(cbind(coding,noncoding)))
+f_binary <-f_binary[, c(2,1)]
+f_binary
+(point <- rowSums(m_table[,2:3]))
+(indel <- m_table[,1])
+(m_binary <- as.table(cbind(indel, point)))
+
+
+#Get conditional proportions
+prop.table(f_binary, margin = 1) #margin = 2 means condition on row variable
+
+prop.table(m_binary, margin = 1)
+
+#Test of equality of row probs given one column - default is first column
+ptf<-prop.test(f_binary) #gives confidence intervals for diff of proportions
+prop.test(f_binary[,c(2,1)]) #[,c(2,1)] tells R to switch the column order
+
+prop.test(m_binary)
+prop.test(m_binary[,c(2,1)])
+```
+
+```{r ratioTests}
+tm_binary<-t(m_binary)
+tf_binary<-t(f_binary)
+tm_binary #rows are explanatory vars, cols response vars
+tf_binary #rows are explanatory vars, cols response vars
+mut_rr <- riskratio(tm_binary) # homoplasmic our success, point = success
+feat_rr <- riskratio(tf_binary) #also does fisher exact test if applicable
+
+feat_rr$p.value
+mut_rr$p.value
+
+feat_rr$measure
+mut_rr$measure
+
+# Swapping columns to make heterplasmic = "success"
+mut_rr2 <- riskratio(tm_binary, rev = "c")
+feat_rr2 <- riskratio(tf_binary, rev = "c")
+
+mut_rr2$p.value
+feat_rr2$p.value
+
+feat_rr2$measure
+mut_rr2$measure
+
+(feat_or <- oddsratio.wald(tf_binary, rev = "c"))
+(mut_or <- oddsratio.wald(tm_binary, rev = "c"))
+feat_or$measure
+mut_or$measure
+
+(feat_or2 <- oddsratio.wald(tf_binary))
+(mut_or2 <- oddsratio.wald(tm_binary))
+feat_or2$measure
+mut_or2$measure
+```
+
+```{r total levels chisq}
+fX<-chisq.test(f_table)
+fX$expected
+fX
+fX$residuals
+
+mX<-chisq.test(m_table)
+mX$expected
+mX
+mX$residuals
+
+fG<-GTest(f_table)
+fG$expected
+fG
+mG<-GTest(m_table)
+mG$expected
+mG
+```
+
+```{r mutation by feature}
+tfb<-chisq.test(tf_binary)
+tfb
+tfb$expected
+tmb<-chisq.test(tm_binary)
+tmb
+tmb$expected
+ 
+mutFeattable <- xtabs(rate~mutation + feature, data=mutRates)
+mutFeattable
+mF<-chisq.test(mutFeattable)
+mF
+mF$expected
+mF$residuals
+```
+
+```{r ind rates}
+tRNArates<-mutRates %>% filter(feature == "tRNA")
+tRNAratesHom<-tRNArates %>% filter(plasmicity == "homoplasmic")
+tRNAratesHet<-tRNArates %>% filter(plasmicity == "heteroplasmic")
+
+rRNArates<-mutRates %>% filter(feature == "rRNA")
+rRNAratesHom<-rRNArates %>% filter(plasmicity == "homoplasmic")
+rRNAratesHet<-rRNArates %>% filter(plasmicity == "heteroplasmic")
+
+proteinRates<-mutRates %>% filter(feature == "protein")
+proteinRatesHom<-proteinRates %>% filter(plasmicity == "homoplasmic")
+proteinRatesHet<-proteinRates %>% filter(plasmicity == "heteroplasmic")
+
+non_codingRates<-mutRates %>% filter(feature == "non coding")
+non_codingRatesHom<-non_codingRates %>% filter(plasmicity == "homoplasmic")
+non_codingRatesHet<-non_codingRates %>% filter(plasmicity == "heteroplasmic")
+
+meanthomtRNA<-mean(tRNAratesHom$rate)
+meanthetRNA<-mean(tRNAratesHet$rate)
+meanhomrRNA<-mean(rRNAratesHom$rate)
+meanhetrRNA<-mean(rRNAratesHet$rate)
+meanhomProtein<-mean(proteinRatesHom$rate)
+meanhetProtein<-mean(proteinRatesHet$rate)
+meanhomNC<-mean(non_codingRatesHom$rate)
+meanhetNC<-mean(non_codingRatesHet$rate)
+
+sdthomtRNA<-sd(tRNAratesHom$rate)
+sdthetRNA<-sd(tRNAratesHet$rate)
+sdhomrRNA<-sd(rRNAratesHom$rate)
+sdhetrRNA<-sd(rRNAratesHet$rate)
+sdhomProtein<-sd(proteinRatesHom$rate)
+sdhetProtein<-sd(proteinRatesHet$rate)
+sdhomNC<-sd(non_codingRatesHom$rate)
+sdhetNC<-sd(non_codingRatesHet$rate)
+
+codingRates<-rbind(tRNArates, rRNArates, proteinRates)
+codingRatesHom <- codingRates %>% filter(plasmicity == "homoplasmic")
+codingRatesHet <- codingRates %>% filter(plasmicity == "heteroplasmic")
+codingMeanhom <- mean(codingRatesHom$rate)
+codingMeanhet <- mean(codingRatesHet$rate)
+
+codingSDhom<-sd(codingRatesHom$rate)
+codingSDhet<-sd(codingRatesHet$rate)
+
+codingSDhom
+codingSDhet
+
+mutRates %>% filter(rate < 400) %>% group_by(plasmicity, feature) %>% 
+  ggplot(mapping = aes(x = feature, y = rate, color = plasmicity)) +
+    geom_point() + 
+    labs(title = "Highly skewed distribution of per gene normalized\nsubstitution rates", subtitle = "Mean and SE of normalized rate per gene per base pair",
+         x = "Sequence Type", y = "Substitution Rate") +
+  theme(axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text.y = element_text(size = 12)) +
+stat_summary(size = 1) +
+  scale_color_manual(values = topo.colors(4))
+```
+
+```{r condInd}
+
+threeWay1<-xtabs(rate~mutation + feature + plasmicity, data = mutRates)
+threeWay1
+#store the test stats in a vector for each level of plasmicity
+Gplasm<-rep(-1,2)
+#Finding LRT for each level of plasmicity
+for(i in 1:2){Gplasm[i] <- GTest(threeWay1[,,i])$statistic}
+Gplasm
+LRT_G<-sum(Gplasm[1:2])
+LRT_G
+dim(threeWay1)
+
+chiPlasm<-rep(-1,2)
+for(i in 1:2){chiPlasm[i] <- chisq.test(threeWay1[,,i])$statistic}
+chiPlasm
+
+#Df = (I-1)*(J-1)*K
+dfPlasm = (3-1)*(4-1)*(2)
+(p_value_ConIndplasm <- pchisq(c(LRT_G),df=dfPlasm, lower.tail = F))
+
+threeWay2<-xtabs(rate~plasmicity + mutation + feature, data = mutRates)
+threeWay2
+Gseq<-rep(-1, 4)
+for(i in 1:4){Gseq[i] <- GTest(threeWay2[,,i])$statistic}
+Gseq
+LRT_G2<-sum(Gseq[1:4])
+LRT_G2
+dim(threeWay2)
+#Df = (I-1)*(J-1)*K
+dfSeq = (2-1)*(3-1)*4
+(p_value_ConIndseq <- pchisq(c(LRT_G2),df=dfSeq, lower.tail = F))
+p_value_ConIndprot <- pchisq(2.14,df=2, lower.tail = F)
+p_value_ConIndprot
+
+threeWay3<-xtabs(rate~plasmicity + feature + mutation, data = mutRates)
+threeWay3
+GMut<-rep(-1, 3)
+for(i in 1:3){GMut[i] <- GTest(threeWay3[,,i])$statistic}
+GMut
+LRT_G3<-sum(Gseq[1:3])
+LRT_G3
+dim(threeWay3)
+#Df = (I-1)*(J-1)*K
+dfMut = (2-1)*(4-1)*3
+(p_value_ConIndseq <- pchisq(c(LRT_G3),df=dfMut, lower.tail = F))
+(p_value_ConIndmut <- pchisq(12.9 ,df=3, lower.tail = F))
+```
+
