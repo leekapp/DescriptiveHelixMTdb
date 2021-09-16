@@ -24,7 +24,7 @@ The incidence of mitochondrial disorders (Figure 2) is roughly 1 in 5000 and at 
   <figcaption>Nussbaum, R.L., McInnes, R.R., and Willard, H.F., 2007 <em>Thompson and Thompson Genetics in Medicine 7th ed.</em> Philadelphia: Saunders</figcaption>
 </figure>
 
-We obtained the HelixMTDdb dataset of more than 4 million nucleotide polymorphisms in the mtDNA of over 195,000 individuals who voluntarily donated saliva samples to Helix for general genomics research.  We did not explore in detail whether specific mutations detected are likely to be pathogenic, as that would be beyond the scope of this assignment.  Instead, we focussed on whether genes and sequence features in mtDNA are equally likely to harbor mutations and whether distinct types of mutations are equally likely in all sequence features.  
+We obtained the HelixMTdb dataset of more than 4 million nucleotide polymorphisms in the mtDNA of over 195,000 individuals who voluntarily donated saliva samples to Helix for general genomics research.  We did not explore in detail whether specific mutations detected are likely to be pathogenic, as that would be beyond the scope of this assignment.  Instead, we focussed on whether genes and sequence features in mtDNA are equally likely to harbor mutations and whether distinct types of mutations are equally likely in all sequence features.  
 
 ## **Data Description**
 
